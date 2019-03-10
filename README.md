@@ -1,494 +1,165 @@
-TweetNaCl.js
-============
+# node-ytdl-core
+[![Build Status](https://secure.travis-ci.org/fent/node-ytdl-core.svg)](http://travis-ci.org/fent/node-ytdl-core)
+[![Dependency Status](https://david-dm.org/fent/node-ytdl-core.svg)](https://david-dm.org/fent/node-ytdl-core)
+[![codecov](https://codecov.io/gh/fent/node-ytdl-core/branch/master/graph/badge.svg)](https://codecov.io/gh/fent/node-ytdl-core)
+[![Discord](https://img.shields.io/discord/484464227067887645.svg)](https://discord.gg/V3vSCs7)
 
-Port of [TweetNaCl](http://tweetnacl.cr.yp.to) / [NaCl](http://nacl.cr.yp.to/)
-to JavaScript for modern browsers and Node.js. Public domain.
+Yet another youtube downloading module. Written with only Javascript and a node-friendly streaming interface.
 
-[![Build Status](https://travis-ci.org/dchest/tweetnacl-js.svg?branch=master)
-](https://travis-ci.org/dchest/tweetnacl-js)
+For a CLI version of this, check out [ytdl](https://github.com/fent/node-ytdl), [pully](https://github.com/JimmyBoh/pully), and [yodl](https://github.com/Luxray5474/yodl).
 
-Demo: <https://dchest.github.io/tweetnacl-js/>
+# Support
+You can contact us for support on our [chat server](https://discord.gg/V3vSCs7)
 
-Documentation
-=============
+# Usage
 
-* [Overview](#overview)
-* [Audits](#audits)
-* [Installation](#installation)
-* [Examples](#examples)
-* [Usage](#usage)
-  * [Public-key authenticated encryption (box)](#public-key-authenticated-encryption-box)
-  * [Secret-key authenticated encryption (secretbox)](#secret-key-authenticated-encryption-secretbox)
-  * [Scalar multiplication](#scalar-multiplication)
-  * [Signatures](#signatures)
-  * [Hashing](#hashing)
-  * [Random bytes generation](#random-bytes-generation)
-  * [Constant-time comparison](#constant-time-comparison)
-* [System requirements](#system-requirements)
-* [Development and testing](#development-and-testing)
-* [Benchmarks](#benchmarks)
-* [Contributors](#contributors)
-* [Who uses it](#who-uses-it)
+```js
+const fs = require('fs');
+const ytdl = require('ytdl-core');
 
+ytdl('http://www.youtube.com/watch?v=A02s8omM_hI')
+  .pipe(fs.createWriteStream('video.flv'));
+```
 
-Overview
---------
 
-The primary goal of this project is to produce a translation of TweetNaCl to
-JavaScript which is as close as possible to the original C implementation, plus
-a thin layer of idiomatic high-level API on top of it.
+# API
+### ytdl(url, [options])
 
-There are two versions, you can use either of them:
+Attempts to download a video from the given url. Returns a [readable stream](https://nodejs.org/api/stream.html#stream_class_stream_readable). `options` can have the following keys
 
-* `nacl.js` is the port of TweetNaCl with minimum differences from the
-  original + high-level API.
+* `quality` - Video quality to download. Can be an [itag value](http://en.wikipedia.org/wiki/YouTube#Quality_and_formats), a list of itag values, or `highest`/`lowest`/`highestaudio`/`lowestaudio`/`highestvideo`/`lowestvideo`. `highestaudio`/`lowestaudio`/`highestvideo`/`lowestvideo` all prefer audio/video only respectively. Defaults to `highest`.
+* `filter` - Used to decide what format to download. Can be `audioandvideo` to filter formats that contain both video and audio, `video` to filter for formats that contain video, or `videoonly` for formats that contain video and no additional audio track. Can also be `audio` or `audioonly`. You can give a filtering function that gets called with each format available. This function is given the `format` object as its first argument, and should return true if the format is preferable.
+* `format` - Primarily used to download specific video or audio streams. This can be a specific `format` object returned from `getInfo`.
+  * Supplying this option will ignore the `filter` and `quality` options since the format is explicitly provided.
+* `range` - A byte range in the form `{start: INT, end: INT}` that specifies part of the file to download, ie {start: 10355705, end: 12452856}.
+  * This downloads a portion of the file, and not a separately spliced video.
+* `begin` - What time in the video to begin. Supports formats `00:00:00.000`, `0ms, 0s, 0m, 0h`, or number of milliseconds. Example: `1:30`, `05:10.123`, `10m30s`. For live videos, this also accepts a unix timestamp or Date, and defaults to `Date.now()`.
+  * This option may not work on super short (less than 30s) videos, and has to be at or above 6s, see [#129](https://github.com/fent/node-ytdl-core/issues/129).
+  * It may also not work for some formats, see [#219](https://github.com/fent/node-ytdl-core/issues/219).
+* `liveBuffer` - How much time buffer to use for live videos in milliseconds. Default is `20000`.
+* `requestOptions` - Anything to merge into the request options which [miniget](https://github.com/fent/node-miniget) is called with, such as headers.
+* `highWaterMark` - How much of the video download to buffer into memory. See [node's docs](https://nodejs.org/api/stream.html#stream_constructor_new_stream_writable_options) for more.
+* `lang` - The 2 character symbol of a language. Default is `en`.
 
-* `nacl-fast.js` is like `nacl.js`, but with some functions replaced with
-  faster versions. (Used by default when importing NPM package.)
+```js
+// Example with `filter` option.
+ytdl(url, { filter: (format) => format.container === 'mp4' })
+  .pipe(fs.createWriteStream('video.mp4'));
+```
 
+#### Event: info
+* [`ytdl.videoInfo`](example/info.json) - Info.
+* [`ytdl.videoFormat`](typings/index.d.ts#L22) - Video Format.
 
-Audits
-------
+Emitted when the a video's `info` hash is fetched, along with the chosen format metadata to download. `format.url` might be different if `start` was given.
 
-TweetNaCl.js has been audited by [Cure53](https://cure53.de/) in January-February
-2017 (audit was sponsored by [Deletype](https://deletype.com)):
+#### Event: response
+* [`http.ServerResponse`](https://nodejs.org/api/http.html#http_class_http_serverresponse) - Response.
 
-> The overall outcome of this audit signals a particularly positive assessment
-> for TweetNaCl-js, as the testing team was unable to find any security
-> problems in the library. It has to be noted that this is an exceptionally
-> rare result of a source code audit for any project and must be seen as a true
-> testament to a development proceeding with security at its core.
->
-> To reiterate, the TweetNaCl-js project, the source code was found to be
-> bug-free at this point.
->
-> [...]
->
-> In sum, the testing team is happy to recommend the TweetNaCl-js project as
-> likely one of the safer and more secure cryptographic tools among its
-> competition.
+Emitted when the video response has been found and has started downloading or after any successful reconnects. Can be used to get the size of the download.
 
-[Read full audit report](https://cure53.de/tweetnacl.pdf)
+#### Event: progress
+* `number` - Chunk byte length.
+* `number` - Total bytes or segments downloaded.
+* `number` - Total bytes or segments.
 
+Emitted whenever a new chunk is received. Passes values describing the download progress.
 
-Installation
-------------
+### ytdl.getBasicInfo(url, [options], [callback(err, info)])
 
-You can install TweetNaCl.js via a package manager:
+Use this if you only want to get metainfo from a video. If `callback` isn't given, returns a promise.
 
-[Yarn](https://yarnpkg.com/):
+### ytdl.getInfo(url, [options], [callback(err, info)])
 
-    $ yarn add tweetnacl
+Gets metainfo from a video. Includes additional formats, and ready to download deciphered URL. This is what the `ytdl()` function uses internally. If `callback` isn't given, returns a promise.
 
-[NPM](https://www.npmjs.org/):
+### ytdl.downloadFromInfo(info, options)
 
-    $ npm install tweetnacl
+Once you have received metadata from a video with the `ytdl.getInfo` function, you may pass that information along with other options to this function.
 
-or [download source code](https://github.com/dchest/tweetnacl-js/releases).
+### ytdl.chooseFormat(formats, options)
 
+Can be used if you'd like to choose a format yourself with the [options above](#ytdlurl-options).
 
-Examples
---------
-You can find usage examples in our [wiki](https://github.com/dchest/tweetnacl-js/wiki/Examples).
+```js
+// Example of choosing a video format.
+ytdl.getInfo(videoID, (err, info) => {
+  if (err) throw err;
+  let format = ytdl.chooseFormat(info.formats, { quality: '134' });
+  if (format) {
+    console.log('Format found!');
+  }
+});
+```
 
+### ytdl.filterFormats(formats, filter)
 
-Usage
------
+If you'd like to work with only some formats, you can use the [`filter` option above](#ytdlurl-options).
 
-All API functions accept and return bytes as `Uint8Array`s.  If you need to
-encode or decode strings, use functions from
-<https://github.com/dchest/tweetnacl-util-js> or one of the more robust codec
-packages.
+```js
+// Example of filtering the formats to audio only.
+ytdl.getInfo(videoID, (err, info) => {
+  if (err) throw err;
+  let audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+  console.log('Formats with only audio: ' + audioFormats.length);
+});
+```
 
-In Node.js v4 and later `Buffer` objects are backed by `Uint8Array`s, so you
-can freely pass them to TweetNaCl.js functions as arguments. The returned
-objects are still `Uint8Array`s, so if you need `Buffer`s, you'll have to
-convert them manually; make sure to convert using copying: `Buffer.from(array)`
-(or `new Buffer(array)` in Node.js v4 or earlier), instead of sharing:
-`Buffer.from(array.buffer)` (or `new Buffer(array.buffer)` Node 4 or earlier),
-because some functions return subarrays of their buffers.
+### ytdl.validateID(id)
 
+Returns true if the given string satisfies YouTube's ID format.
 
-### Public-key authenticated encryption (box)
+### ytdl.validateURL(url)
 
-Implements *x25519-xsalsa20-poly1305*.
+Returns true if able to parse out a valid video ID.
 
-#### nacl.box.keyPair()
+### ytdl.getURLVideoID(url)
 
-Generates a new random key pair for box and returns it as an object with
-`publicKey` and `secretKey` members:
+Returns a video ID from a YouTube URL.
 
-    {
-       publicKey: ...,  // Uint8Array with 32-byte public key
-       secretKey: ...   // Uint8Array with 32-byte secret key
-    }
+### ytdl.getVideoID(str)
 
+Same as the above `ytdl.getURLVideoID()`, but can be called with the video ID directly, in which case it returns it. This is what ytdl uses internally.
 
-#### nacl.box.keyPair.fromSecretKey(secretKey)
+## Limitations
 
-Returns a key pair for box with public key corresponding to the given secret
-key.
+ytdl cannot download videos that fall into the following
+* Regionally restricted (requires a [proxy](example/proxy.js))
+* Private
+* Rentals
 
-#### nacl.box(message, nonce, theirPublicKey, mySecretKey)
+YouTube intentionally ratelimits downloads, likely to prevent bandwidth abuse. The download rate is still faster than a media player can play the video, even on 2x. See [#294](https://github.com/fent/node-ytdl-core/issues/294).
 
-Encrypts and authenticates message using peer's public key, our secret key, and
-the given nonce, which must be unique for each distinct message for a key pair.
+## Handling Separate Streams
 
-Returns an encrypted and authenticated message, which is
-`nacl.box.overheadLength` longer than the original message.
+Typically 1080p or better video does not have audio encoded with it. The audio must be downloaded separately and merged via an appropriate encoding library. `ffmpeg` is the most widely used tool, with many [Node.js modules available](https://www.npmjs.com/search?q=ffmpeg). Use the `format` objects returned from `ytdl.getInfo` to download specific streams to combine to fit your needs. Look at [example/ffmpeg.js](example/ffmpeg.js) for an example on doing this.
 
-#### nacl.box.open(box, nonce, theirPublicKey, mySecretKey)
+## What if it stops working?
 
-Authenticates and decrypts the given box with peer's public key, our secret
-key, and the given nonce.
+Youtube updates their website all the time, it's not that rare for this to stop working. If it doesn't work for you and you're using the latest version, feel free to open up an issue. Make sure to check if there isn't one already with the same error.
 
-Returns the original message, or `null` if authentication fails.
+If you'd like to help fix the issue, look at the type of error first. The most common one is
 
-#### nacl.box.before(theirPublicKey, mySecretKey)
+    Could not extract signature deciphering actions
 
-Returns a precomputed shared key which can be used in `nacl.box.after` and
-`nacl.box.open.after`.
+Run the tests at `test/irl-test.js` just to make sure that this is actually an issue with ytdl-core.
 
-#### nacl.box.after(message, nonce, sharedKey)
+    mocha test/irl-test.js
 
-Same as `nacl.box`, but uses a shared key precomputed with `nacl.box.before`.
+These tests are not mocked, and they actually try to start downloading a few videos. If these fail, then it's time to debug.
 
-#### nacl.box.open.after(box, nonce, sharedKey)
+For getting started with that, you can look at the `extractActions()` function in [`/lib/sig.js`](https://github.com/fent/node-ytdl-core/blob/master/lib/sig.js).
 
-Same as `nacl.box.open`, but uses a shared key precomputed with `nacl.box.before`.
 
-#### Constants
+# Install
 
-##### nacl.box.publicKeyLength = 32
+```bash
+npm install ytdl-core
+```
 
-Length of public key in bytes.
+# Tests
+Tests are written with [mocha](https://mochajs.org)
 
-##### nacl.box.secretKeyLength = 32
-
-Length of secret key in bytes.
-
-##### nacl.box.sharedKeyLength = 32
-
-Length of precomputed shared key in bytes.
-
-##### nacl.box.nonceLength = 24
-
-Length of nonce in bytes.
-
-##### nacl.box.overheadLength = 16
-
-Length of overhead added to box compared to original message.
-
-
-### Secret-key authenticated encryption (secretbox)
-
-Implements *xsalsa20-poly1305*.
-
-#### nacl.secretbox(message, nonce, key)
-
-Encrypts and authenticates message using the key and the nonce. The nonce must
-be unique for each distinct message for this key.
-
-Returns an encrypted and authenticated message, which is
-`nacl.secretbox.overheadLength` longer than the original message.
-
-#### nacl.secretbox.open(box, nonce, key)
-
-Authenticates and decrypts the given secret box using the key and the nonce.
-
-Returns the original message, or `null` if authentication fails.
-
-#### Constants
-
-##### nacl.secretbox.keyLength = 32
-
-Length of key in bytes.
-
-##### nacl.secretbox.nonceLength = 24
-
-Length of nonce in bytes.
-
-##### nacl.secretbox.overheadLength = 16
-
-Length of overhead added to secret box compared to original message.
-
-
-### Scalar multiplication
-
-Implements *x25519*.
-
-#### nacl.scalarMult(n, p)
-
-Multiplies an integer `n` by a group element `p` and returns the resulting
-group element.
-
-#### nacl.scalarMult.base(n)
-
-Multiplies an integer `n` by a standard group element and returns the resulting
-group element.
-
-#### Constants
-
-##### nacl.scalarMult.scalarLength = 32
-
-Length of scalar in bytes.
-
-##### nacl.scalarMult.groupElementLength = 32
-
-Length of group element in bytes.
-
-
-### Signatures
-
-Implements [ed25519](http://ed25519.cr.yp.to).
-
-#### nacl.sign.keyPair()
-
-Generates new random key pair for signing and returns it as an object with
-`publicKey` and `secretKey` members:
-
-    {
-       publicKey: ...,  // Uint8Array with 32-byte public key
-       secretKey: ...   // Uint8Array with 64-byte secret key
-    }
-
-#### nacl.sign.keyPair.fromSecretKey(secretKey)
-
-Returns a signing key pair with public key corresponding to the given
-64-byte secret key. The secret key must have been generated by
-`nacl.sign.keyPair` or `nacl.sign.keyPair.fromSeed`.
-
-#### nacl.sign.keyPair.fromSeed(seed)
-
-Returns a new signing key pair generated deterministically from a 32-byte seed.
-The seed must contain enough entropy to be secure. This method is not
-recommended for general use: instead, use `nacl.sign.keyPair` to generate a new
-key pair from a random seed.
-
-#### nacl.sign(message, secretKey)
-
-Signs the message using the secret key and returns a signed message.
-
-#### nacl.sign.open(signedMessage, publicKey)
-
-Verifies the signed message and returns the message without signature.
-
-Returns `null` if verification failed.
-
-#### nacl.sign.detached(message, secretKey)
-
-Signs the message using the secret key and returns a signature.
-
-#### nacl.sign.detached.verify(message, signature, publicKey)
-
-Verifies the signature for the message and returns `true` if verification
-succeeded or `false` if it failed.
-
-#### Constants
-
-##### nacl.sign.publicKeyLength = 32
-
-Length of signing public key in bytes.
-
-##### nacl.sign.secretKeyLength = 64
-
-Length of signing secret key in bytes.
-
-##### nacl.sign.seedLength = 32
-
-Length of seed for `nacl.sign.keyPair.fromSeed` in bytes.
-
-##### nacl.sign.signatureLength = 64
-
-Length of signature in bytes.
-
-
-### Hashing
-
-Implements *SHA-512*.
-
-#### nacl.hash(message)
-
-Returns SHA-512 hash of the message.
-
-#### Constants
-
-##### nacl.hash.hashLength = 64
-
-Length of hash in bytes.
-
-
-### Random bytes generation
-
-#### nacl.randomBytes(length)
-
-Returns a `Uint8Array` of the given length containing random bytes of
-cryptographic quality.
-
-**Implementation note**
-
-TweetNaCl.js uses the following methods to generate random bytes,
-depending on the platform it runs on:
-
-* `window.crypto.getRandomValues` (WebCrypto standard)
-* `window.msCrypto.getRandomValues` (Internet Explorer 11)
-* `crypto.randomBytes` (Node.js)
-
-If the platform doesn't provide a suitable PRNG, the following functions,
-which require random numbers, will throw exception:
-
-* `nacl.randomBytes`
-* `nacl.box.keyPair`
-* `nacl.sign.keyPair`
-
-Other functions are deterministic and will continue working.
-
-If a platform you are targeting doesn't implement secure random number
-generator, but you somehow have a cryptographically-strong source of entropy
-(not `Math.random`!), and you know what you are doing, you can plug it into
-TweetNaCl.js like this:
-
-    nacl.setPRNG(function(x, n) {
-      // ... copy n random bytes into x ...
-    });
-
-Note that `nacl.setPRNG` *completely replaces* internal random byte generator
-with the one provided.
-
-
-### Constant-time comparison
-
-#### nacl.verify(x, y)
-
-Compares `x` and `y` in constant time and returns `true` if their lengths are
-non-zero and equal, and their contents are equal.
-
-Returns `false` if either of the arguments has zero length, or arguments have
-different lengths, or their contents differ.
-
-
-System requirements
--------------------
-
-TweetNaCl.js supports modern browsers that have a cryptographically secure
-pseudorandom number generator and typed arrays, including the latest versions
-of:
-
-* Chrome
-* Firefox
-* Safari (Mac, iOS)
-* Internet Explorer 11
-
-Other systems:
-
-* Node.js
-
-
-Development and testing
-------------------------
-
-Install NPM modules needed for development:
-
-    $ npm install
-
-To build minified versions:
-
-    $ npm run build
-
-Tests use minified version, so make sure to rebuild it every time you change
-`nacl.js` or `nacl-fast.js`.
-
-### Testing
-
-To run tests in Node.js:
-
-    $ npm run test-node
-
-By default all tests described here work on `nacl.min.js`. To test other
-versions, set environment variable `NACL_SRC` to the file name you want to test.
-For example, the following command will test fast minified version:
-
-    $ NACL_SRC=nacl-fast.min.js npm run test-node
-
-To run full suite of tests in Node.js, including comparing outputs of
-JavaScript port to outputs of the original C version:
-
-    $ npm run test-node-all
-
-To prepare tests for browsers:
-
-    $ npm run build-test-browser
-
-and then open `test/browser/test.html` (or `test/browser/test-fast.html`) to
-run them.
-
-To run tests in both Node and Electron:
-
-    $ npm test
-
-### Benchmarking
-
-To run benchmarks in Node.js:
-
-    $ npm run bench
-    $ NACL_SRC=nacl-fast.min.js npm run bench
-
-To run benchmarks in a browser, open `test/benchmark/bench.html` (or
-`test/benchmark/bench-fast.html`).
-
-
-Benchmarks
-----------
-
-For reference, here are benchmarks from MacBook Pro (Retina, 13-inch, Mid 2014)
-laptop with 2.6 GHz Intel Core i5 CPU (Intel) in Chrome 53/OS X and Xiaomi Redmi
-Note 3 smartphone with 1.8 GHz Qualcomm Snapdragon 650 64-bit CPU (ARM) in
-Chrome 52/Android:
-
-|               | nacl.js Intel | nacl-fast.js Intel  |   nacl.js ARM | nacl-fast.js ARM  |
-| ------------- |:-------------:|:-------------------:|:-------------:|:-----------------:|
-| salsa20       | 1.3 MB/s      | 128 MB/s            |  0.4 MB/s     |  43 MB/s          |
-| poly1305      | 13 MB/s       | 171 MB/s            |  4 MB/s       |  52 MB/s          |
-| hash          | 4 MB/s        | 34 MB/s             |  0.9 MB/s     |  12 MB/s          |
-| secretbox 1K  | 1113 op/s     | 57583 op/s          |  334 op/s     |  14227 op/s       |
-| box 1K        | 145 op/s      | 718 op/s            |  37 op/s      |  368 op/s         |
-| scalarMult    | 171 op/s      | 733 op/s            |  56 op/s      |  380 op/s         |
-| sign          | 77  op/s      | 200 op/s            |  20 op/s      |  61 op/s          |
-| sign.open     | 39  op/s      | 102  op/s           |  11 op/s      |  31 op/s          |
-
-(You can run benchmarks on your devices by clicking on the links at the bottom
-of the [home page](https://tweetnacl.js.org)).
-
-In short, with *nacl-fast.js* and 1024-byte messages you can expect to encrypt and
-authenticate more than 57000 messages per second on a typical laptop or more than
-14000 messages per second on a $170 smartphone, sign about 200 and verify 100
-messages per second on a laptop or 60 and 30 messages per second on a smartphone,
-per CPU core (with Web Workers you can do these operations in parallel),
-which is good enough for most applications.
-
-
-Contributors
-------------
-
-See AUTHORS.md file.
-
-
-Third-party libraries based on TweetNaCl.js
--------------------------------------------
-
-* [forward-secrecy](https://github.com/alax/forward-secrecy) — Axolotl ratchet implementation
-* [nacl-stream](https://github.com/dchest/nacl-stream-js) - streaming encryption
-* [tweetnacl-auth-js](https://github.com/dchest/tweetnacl-auth-js) — implementation of [`crypto_auth`](http://nacl.cr.yp.to/auth.html)
-* [tweetnacl-sealed-box](https://github.com/whs/tweetnacl-sealed-box) — implementation of [`sealed boxes`](https://download.libsodium.org/doc/public-key_cryptography/sealed_boxes.html)
-* [chloride](https://github.com/dominictarr/chloride) - unified API for various NaCl modules
-
-
-Who uses it
------------
-
-Some notable users of TweetNaCl.js:
-
-* [MEGA](https://github.com/meganz/webclient)
-* [Peerio](https://www.peerio.com/)
-* [Stellar](https://www.stellar.org/)
-* [miniLock](http://minilock.io/)
+```bash
+npm test
+```
